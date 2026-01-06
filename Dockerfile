@@ -16,10 +16,14 @@ RUN pip install --no-cache-dir \
     cloudinary \
     pillow
 
-# Download model at build time
+# Create models directory
 RUN mkdir -p /app/models
-RUN wget -O /app/models/civitai_new.safetensors \
-    "https://civitai.com/api/download/models/2155386?type=Model&format=SafeTensor&size=pruned&fp=fp16&token=8da2037b00e9b0f247f4d408944d473e"
+
+# Download model with better error handling
+RUN curl -L -o /app/models/civitai_new.safetensors \
+    "https://civitai.com/api/download/models/2155386?type=Model&format=SafeTensor&size=pruned&fp=fp16&token=8da2037b00e9b0f247f4d408944d473e" \
+    && ls -lh /app/models/ \
+    && test -s /app/models/civitai_new.safetensors || (echo "Download failed!" && exit 1)
 
 COPY handler.py /app/handler.py
 
