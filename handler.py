@@ -104,26 +104,26 @@ SFW_NEGATIVE_PROMPT = NEGATIVE_PROMPT + """, nude, naked, NSFW, explicit, sexual
 PROMPTS = {
     # INTERCOURSE
     "doggy_style": """score_9, score_8_up, score_7_up, 1girl 1boy, doggystyle sex from behind, on all fours,
-        woman on hands and knees on bed, deeply arched back, ass raised high, head down moaning,
+        {skin_description}, woman on hands and knees on bed, deeply arched back, ass raised high, head down moaning,
         {age} years old, {hair_description}, {eye_description}, gorgeous face showing pleasure,
-        {breast_description} hanging swaying, {skin_description}, athletic body, round bubble butt jiggling,
+        {breast_description} hanging swaying, athletic body, {butt_description} jiggling,
         pussy visible from behind stretched around cock, deep penetration, man kneeling behind gripping hips,
         thick penis penetrating deeply, intense thrusting, ass rippling from impact,
         {setting_description}, photorealistic, 8K UHD, hyperrealistic, masterpiece""",
     
     "missionary": """score_9, score_8_up, score_7_up, 1girl 1boy, missionary position sex, face to face,
-        woman lying on back on bed, legs spread wide, hair spread on pillow,
+        {skin_description}, woman lying on back on bed, legs spread wide, hair spread on pillow,
         {age} years old, {hair_description}, {eye_description}, face looking up with eye contact,
-        {breast_description} visible, {skin_description}, narrow waist, wide hips,
+        {breast_description} visible, narrow waist, wide hips,
         pussy stretched around penetrating penis, deep penetration visible,
         athletic man on top between legs, arms supporting, thick penis penetrating,
         legs wrapped around waist, passionate intimate sex,
         {setting_description}, photorealistic, 8K UHD, hyperrealistic, masterpiece""",
     
     "cowgirl": """score_9, score_8_up, score_7_up, 1girl 1boy, cowgirl riding position, woman on top,
-        woman straddling riding, sitting on hips, knees on bed, thighs flexed,
+        {skin_description}, woman straddling riding, sitting on hips, knees on bed, thighs flexed,
         {age} years old, {hair_description} flowing with motion, {eye_description}, face tilted back moaning,
-        {breast_description} bouncing wildly, {skin_description}, athletic body, round bubble butt,
+        {breast_description} bouncing wildly, athletic body, {butt_description},
         pussy stretched around cock, riding motion, deep penetration,
         man lying underneath, hands gripping her hips, powerful bouncing motion,
         {setting_description}, photorealistic, 8K UHD, hyperrealistic, masterpiece""",
@@ -170,9 +170,9 @@ PROMPTS = {
 
     # ORAL
     "blowjob": """score_9, score_8_up, score_7_up, 1girl 1boy, blowjob oral sex, cock in mouth, kneeling,
-        woman kneeling, face at crotch level, mouth wrapped around cock,
+        {skin_description}, woman kneeling, face at crotch level, mouth wrapped around cock,
         {age} years old, {hair_description}, {eye_description} looking up eye contact,
-        {breast_description} hanging, {skin_description},
+        {breast_description} hanging, gorgeous face,
         mouth stretched around thick penis, cheeks hollowing, saliva dripping,
         hands on thighs or stroking shaft, tongue visible, man standing hands on head,
         rhythmic head bobbing, intense oral pleasure,
@@ -311,17 +311,17 @@ PROMPTS = {
         {setting_description}, photorealistic, 8K UHD, creampie detailed, masterpiece""",
     
     "cumshot": """score_9, score_8_up, score_7_up, 1girl 1boy, facial cumshot, cum on face,
-        woman kneeling, face tilted up, cum covering face,
+        {skin_description}, woman kneeling, face tilted up, cum covering face,
         {age} years old, {hair_description} may have cum, {eye_description} looking up,
-        {breast_description} may have cum, {skin_description} with white cum,
+        {breast_description} may have cum, gorgeous face with white cum,
         face covered with cum, semen on cheeks nose forehead chin,
         thick ropes of cum, dripping, tongue out catching, mouth open,
         {setting_description}, photorealistic, 8K UHD, facial detailed, masterpiece""",
     
     "cumshot_face": """score_9, score_8_up, score_7_up, 1girl 1boy, facial cumshot, cum on face,
-        woman kneeling, face tilted up, cum covering face,
+        {skin_description}, woman kneeling, face tilted up, cum covering face,
         {age} years old, {hair_description} may have cum, {eye_description} looking up,
-        {breast_description} may have cum, {skin_description} with white cum,
+        {breast_description} may have cum, gorgeous face with white cum,
         face covered with cum, semen on cheeks nose forehead chin,
         thick ropes of cum, dripping, tongue out catching, mouth open,
         {setting_description}, photorealistic, 8K UHD, facial detailed, masterpiece""",
@@ -402,9 +402,9 @@ PROMPTS = {
 
     # MISC
     "standing": """score_9, score_8_up, score_7_up, 1girl solo, standing nude, confident pose,
-        woman standing upright, nude, legs slightly apart, confident,
+        {skin_description}, woman standing upright, nude, legs slightly apart, confident,
         {age} years old, {hair_description}, {eye_description} looking at camera,
-        {breast_description} natural position, {skin_description},
+        {breast_description} natural position, {butt_description},
         standing straight confident, full nude body displayed,
         pussy visible between legs, comfortable nude,
         {setting_description}, photorealistic, 8K UHD, full body, masterpiece""",
@@ -542,6 +542,18 @@ def load_models():
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
+def safe_format(template: str, **kwargs) -> str:
+    """Format string with fallback for missing keys"""
+    import re
+    # Find all {key} placeholders
+    placeholders = re.findall(r'\{(\w+)\}', template)
+    # Add default empty string for missing keys
+    for key in placeholders:
+        if key not in kwargs:
+            kwargs[key] = ""
+    return template.format(**kwargs)
+
+
 def split_prompt_for_sdxl(prompt: str) -> tuple:
     parts = [p.strip() for p in prompt.split(',') if p.strip()]
     if len(parts) <= 30:
@@ -581,7 +593,7 @@ def parse_character(character: dict) -> dict:
     """Parse character data from frontend payload"""
     # Extract hair info
     hair_style = character.get("hairStyle", "long").lower()
-    hair_colors = ['blonde', 'brunette', 'red', 'black', 'brown', 'white', 'pink', 'blue']
+    hair_colors = ['blonde', 'brunette', 'red', 'black', 'brown', 'white', 'pink', 'blue', 'auburn', 'ginger', 'silver', 'purple']
     hair_color = None
     description = character.get("description", "").lower()
     for color in hair_colors:
@@ -596,20 +608,114 @@ def parse_character(character: dict) -> dict:
     
     # Breast size
     breast_size = character.get("breastSize", "Large").lower()
-    breast_map = {"small": "small breasts", "medium": "medium breasts", "large": "large breasts", "extra-large": "huge breasts"}
+    breast_map = {
+        "small": "small breasts, petite chest",
+        "medium": "medium breasts, average chest",
+        "large": "large breasts, big chest",
+        "extra-large": "huge breasts, massive chest"
+    }
     breast_description = breast_map.get(breast_size, "large breasts")
     
-    # Skin/ethnicity
-    ethnicity = character.get("ethnicity", "white").lower()
-    skin_map = {
-        "asian": "fair skin, east asian features",
-        "black": "dark brown skin, african features",
-        "white": "fair skin, caucasian features",
-        "latina": "tan skin, latina features",
-        "arab": "olive skin, arab features",
-        "indian": "brown skin, indian features",
+    # Butt size
+    butt_size = character.get("buttSize", "Medium").lower()
+    butt_map = {
+        "small": "small butt, petite ass",
+        "medium": "round butt, medium ass",
+        "large": "big butt, thick ass, bubble butt",
+        "extra-large": "huge butt, massive ass, thicc"
     }
-    skin_description = skin_map.get(ethnicity, "fair skin")
+    butt_description = butt_map.get(butt_size, "round butt")
+    
+    # Ethnicity - DETAILED mapping for accurate representation
+    ethnicity = character.get("ethnicity", "white").lower()
+    
+    # Detailed ethnicity descriptions for SDXL - Matching App Options
+    ethnicity_map = {
+        # === REAL ETHNICITIES ===
+        "asian": {
+            "skin": "fair porcelain skin",
+            "features": "east asian woman, asian face, monolid eyes, delicate asian features, beautiful asian girl",
+            "body": "petite asian body, slim figure"
+        },
+        "black": {
+            "skin": "dark brown skin, ebony skin, rich dark complexion",
+            "features": "black woman, african features, beautiful black girl, full lips, african american",
+            "body": "curvy body, thick thighs"
+        },
+        "white": {
+            "skin": "fair skin, pale porcelain skin",
+            "features": "caucasian woman, european features, beautiful white girl, western face",
+            "body": "athletic body"
+        },
+        "latina": {
+            "skin": "tan skin, olive skin, caramel complexion, sun-kissed skin",
+            "features": "latina woman, latin features, beautiful latina girl, hispanic, latin american",
+            "body": "curvy latina body, wide hips, hourglass figure"
+        },
+        "arab": {
+            "skin": "olive skin, tan skin, middle eastern complexion",
+            "features": "arab woman, middle eastern features, beautiful arab girl, exotic middle eastern beauty, persian features",
+            "body": "curvy body"
+        },
+        "indian": {
+            "skin": "brown skin, caramel skin, warm brown complexion",
+            "features": "indian woman, south asian features, beautiful indian girl, desi beauty, bollywood beauty",
+            "body": "curvy body, wide hips"
+        },
+        
+        # === FANTASY ETHNICITIES (PRO) ===
+        "elf": {
+            "skin": "pale ethereal skin, flawless porcelain skin, luminous skin",
+            "features": "elf woman, elven features, pointed elf ears, ethereal beauty, fantasy elf, high elf, elegant elven face, otherworldly beauty",
+            "body": "slender elegant body, graceful elven figure"
+        },
+        "alien": {
+            "skin": "pale pink skin, unusual skin tone, otherworldly complexion",
+            "features": "alien woman, alien humanoid, pointed ears, exotic alien features, extraterrestrial beauty, sci-fi alien girl, unusual eye color",
+            "body": "slim otherworldly body"
+        },
+        "demon": {
+            "skin": "pale skin with dark undertones, supernatural complexion",
+            "features": "demon woman, demon girl, succubus, small horns on head, demonic beauty, supernatural features, seductive demon, dark fantasy",
+            "body": "curvy seductive body, supernatural figure"
+        },
+        
+        # === FALLBACK ALIASES ===
+        "european": {
+            "skin": "fair skin",
+            "features": "european woman, western features",
+            "body": "athletic body"
+        },
+        "african": {
+            "skin": "dark ebony skin",
+            "features": "african woman, african features",
+            "body": "curvy body"
+        },
+        "hispanic": {
+            "skin": "tan skin, olive skin",
+            "features": "hispanic woman, latin features",
+            "body": "curvy body"
+        },
+        "middle_eastern": {
+            "skin": "olive skin",
+            "features": "middle eastern woman, persian features",
+            "body": "curvy body"
+        },
+        "mixed": {
+            "skin": "tan skin",
+            "features": "mixed race woman, exotic beauty, unique features",
+            "body": "athletic body"
+        }
+    }
+    
+    # Get ethnicity details or default to white
+    eth_details = ethnicity_map.get(ethnicity, ethnicity_map["white"])
+    
+    # Combine skin and features for skin_description
+    skin_description = f"{eth_details['skin']}, {eth_details['features']}"
+    
+    # Add body type from ethnicity if not conflicting
+    ethnicity_body = eth_details.get('body', '')
     
     # Occupation/setting
     personality = character.get("personalityId", {}) or {}
@@ -621,10 +727,13 @@ def parse_character(character: dict) -> dict:
         "age": character.get("age", 25),
         "name": character.get("name", "unknown"),
         "gender": character.get("gender", "Female").lower(),
+        "ethnicity": ethnicity,
         "hair_description": hair_description,
         "eye_description": eye_description,
         "breast_description": breast_description,
+        "butt_description": butt_description,
         "skin_description": skin_description,
+        "ethnicity_body": ethnicity_body,
         "setting_description": setting_description,
         "occupation": occupation
     }
@@ -647,10 +756,12 @@ def handler(event):
             features = {
                 "age": input_data.get("age", 25),
                 "name": input_data.get("character_name", "unknown"),
+                "ethnicity": input_data.get("ethnicity", "white"),
                 "hair_description": input_data.get("hair_description", "long blonde hair"),
                 "eye_description": input_data.get("eye_description", "blue eyes"),
                 "breast_description": input_data.get("breast_description", "large breasts"),
-                "skin_description": input_data.get("skin_description", "fair skin"),
+                "butt_description": input_data.get("butt_description", "round butt"),
+                "skin_description": input_data.get("skin_description", "fair skin, caucasian features"),
                 "setting_description": input_data.get("setting_description", "bedroom, soft lighting"),
             }
         
@@ -685,9 +796,9 @@ def handler(event):
         
         # Build prompt
         if pose_name in prompts_dict:
-            prompt = prompts_dict[pose_name].format(**features)
+            prompt = safe_format(prompts_dict[pose_name], **features)
         else:
-            prompt = prompts_dict.get("standing", PROMPTS["standing"]).format(**features)
+            prompt = safe_format(prompts_dict.get("standing", PROMPTS["standing"]), **features)
             pose_name = "standing"
         
         preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["ultra_hd"])
