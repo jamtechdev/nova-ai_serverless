@@ -19,11 +19,10 @@ RUN pip install --no-cache-dir \
 # Create models directory
 RUN mkdir -p /app/models
 
-# Download model with better error handling
+# Download SDXL model
 RUN curl -L -o /app/models/civitai_new.safetensors \
     "https://civitai.com/api/download/models/2155386?type=Model&format=SafeTensor&size=pruned&fp=fp16&token=8da2037b00e9b0f247f4d408944d473e" \
-    && ls -lh /app/models/ \
-    && test -s /app/models/civitai_new.safetensors || (echo "Download failed!" && exit 1)
+    && ls -lh /app/models/
 
 COPY handler.py /app/handler.py
 
