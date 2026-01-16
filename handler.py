@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 RunPod Serverless - NSFW Image Generator
-Optimized prompts - Ethnicity FIRST within 77 token CLIP limit
+Dual Style Support: Realistic + Anime
 """
 import os
 os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'
@@ -25,28 +25,38 @@ try:
 except ImportError:
     print("⚠️ Compel not available")
 
-# Optional Cloudinary
-CLOUDINARY_AVAILABLE = False
+# Supabase Storage
+SUPABASE_AVAILABLE = False
+supabase_client = None
 try:
-    import cloudinary
-    import cloudinary.uploader
-    cloudinary.config(
-        cloud_name="dpofaoo6n",
-        api_key="278875338772311",
-        api_secret="CcghZeTAPMZYdly0SjxG69ENN2w"
-    )
-    CLOUDINARY_AVAILABLE = True
-    print("✅ Cloudinary configured")
-except:
-    print("⚠️ Cloudinary not available")
+    from supabase import create_client
+    
+    # Configure your Supabase credentials here
+    SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://kyfhvltdlauacdtzpyeo.supabase.co")
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt5Zmh2bHRkbGF1YWNkdHpweWVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc5NDk3MzcsImV4cCI6MjA4MzUyNTczN30.xpJEvbO6Prh2jUq7qR79yKpdl2_pNLbmv-ty3EZuUlw")
+    SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "ai-images")
+    
+    if SUPABASE_URL and SUPABASE_KEY and "your-" not in SUPABASE_URL:
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        SUPABASE_AVAILABLE = True
+        print(f"✅ Supabase configured: {SUPABASE_URL}")
+    else:
+        print("⚠️ Supabase credentials not set")
+except Exception as e:
+    print(f"⚠️ Supabase not available: {e}")
 
 
-MODEL_PATH = "/app/models/civitai_new.safetensors"
+# ============================================
+# MODEL PATHS
+# ============================================
+REALISTIC_MODEL = "/app/models/realistic.safetensors"
+ANIME_MODEL = "/app/models/anime.safetensors"
 
-pipe = None
-pipe_img2img = None
-compel = None
-compel_img2img = None
+# Global model storage
+models = {
+    "realistic": {"pipe": None, "pipe_img2img": None, "compel": None, "compel_img2img": None},
+    "anime": {"pipe": None, "pipe_img2img": None, "compel": None, "compel_img2img": None}
+}
 
 
 # ============================================
@@ -73,33 +83,71 @@ OCCUPATION_SETTINGS = {
 
 
 # ============================================
-# QUALITY PRESETS - Optimized for Lustify V7
-# Lustify recommends: CFG 2.5-4.5, Steps ~30, Highres 1.4-1.5x, denoise 0.4
+# QUALITY PRESETS - REALISTIC (Lustify)
 # ============================================
-QUALITY_PRESETS = {
+REALISTIC_PRESETS = {
     "standard": {"base_width": 896, "base_height": 1152, "steps": 25, "cfg": 3.5, "highres_scale": 1.4, "highres_steps": 20, "highres_denoise": 0.4},
     "hd": {"base_width": 896, "base_height": 1152, "steps": 30, "cfg": 3.5, "highres_scale": 1.5, "highres_steps": 25, "highres_denoise": 0.4},
     "ultra_hd": {"base_width": 896, "base_height": 1152, "steps": 35, "cfg": 3.5, "highres_scale": 1.5, "highres_steps": 30, "highres_denoise": 0.4},
     "extreme": {"base_width": 896, "base_height": 1152, "steps": 40, "cfg": 4.0, "highres_scale": 1.5, "highres_steps": 35, "highres_denoise": 0.45},
 }
 
+# ============================================
+# QUALITY PRESETS - ANIME
+# ============================================
+ANIME_PRESETS = {
+    "standard": {"base_width": 832, "base_height": 1216, "steps": 25, "cfg": 7.0, "highres_scale": 1.5, "highres_steps": 15, "highres_denoise": 0.5},
+    "hd": {"base_width": 832, "base_height": 1216, "steps": 30, "cfg": 7.0, "highres_scale": 1.5, "highres_steps": 20, "highres_denoise": 0.5},
+    "ultra_hd": {"base_width": 832, "base_height": 1216, "steps": 35, "cfg": 7.0, "highres_scale": 1.5, "highres_steps": 25, "highres_denoise": 0.5},
+    "extreme": {"base_width": 832, "base_height": 1216, "steps": 40, "cfg": 7.5, "highres_scale": 1.5, "highres_steps": 30, "highres_denoise": 0.55},
+}
+
 
 # ============================================
-# NEGATIVE PROMPT - Lustify optimized (simple works better)
+# NEGATIVE PROMPTS
 # ============================================
-NEGATIVE_PROMPT = "worst quality, low quality, bad anatomy, bad hands, deformed, ugly, blurry, watermark, text, logo"
-SFW_NEGATIVE_PROMPT = NEGATIVE_PROMPT + ", nude, naked, nsfw, explicit"
+REALISTIC_NEGATIVE = "worst quality, low quality, bad anatomy, bad hands, deformed, ugly, blurry, watermark, text, logo"
+REALISTIC_SFW_NEGATIVE = REALISTIC_NEGATIVE + ", nude, naked, nsfw, explicit"
+
+ANIME_NEGATIVE = "worst quality, low quality, bad anatomy, bad hands, extra fingers, missing fingers, deformed, ugly, blurry, watermark, text, 3d, realistic, photo"
+ANIME_SFW_NEGATIVE = ANIME_NEGATIVE + ", nude, naked, nsfw, explicit"
 
 
 # ============================================
-# OPTIMIZED PROMPTS FOR LUSTIFY V7
-# - Understands danbooru tags + natural language
-# - Simple prompts work better (no schizoprompting)
-# - Uses camera tags, lighting, photography style
-# - Ethnicity FIRST for CLIP attention
+# ETHNICITY - REALISTIC
 # ============================================
-PROMPTS = {
-    # === INTERCOURSE ===
+REALISTIC_ETHNICITY = {
+    "asian": "asian woman, east asian, porcelain skin, asian face, monolid",
+    "black": "black woman, ebony skin, african features, dark skin beauty",
+    "white": "caucasian woman, fair skin, european features",
+    "latina": "latina woman, tan skin, hispanic features, curvy",
+    "arab": "arab woman, middle eastern, olive skin, exotic beauty",
+    "indian": "indian woman, south asian, brown skin, desi beauty",
+    "elf": "elf woman, pointed elf ears, ethereal beauty, elven features, fantasy elf",
+    "alien": "alien woman, otherworldly, pointed ears, exotic alien, sci-fi",
+    "demon": "demon woman, succubus, small horns, demonic beauty, supernatural",
+}
+
+# ============================================
+# ETHNICITY - ANIME
+# ============================================
+ANIME_ETHNICITY = {
+    "asian": "1girl, pale skin",
+    "black": "1girl, dark skin, dark-skinned female",
+    "white": "1girl, pale skin",
+    "latina": "1girl, tan, tanned",
+    "arab": "1girl, tan, olive skin",
+    "indian": "1girl, dark skin, brown skin",
+    "elf": "1girl, elf, pointy ears, elf ears, fantasy",
+    "alien": "1girl, alien, pointy ears, unusual skin color",
+    "demon": "1girl, demon girl, horns, demon horns, succubus",
+}
+
+
+# ============================================
+# REALISTIC PROMPTS (Lustify optimized)
+# ============================================
+REALISTIC_PROMPTS = {
     "doggy_style": """{skin_description}, {age}yo woman, {hair_description}, {eye_description}, {breast_description},
         doggystyle sex, 1girl 1boy, on all fours, ass up, pussy penetration from behind, moaning face,
         {setting_description}, glamour photography, bokeh, shot on Canon EOS 5D""",
@@ -132,7 +180,6 @@ PROMPTS = {
         wall sex, 1girl 1boy, pressed against wall, legs wrapped, standing sex,
         {setting_description}, dramatic lighting, shot on Canon EOS 5D""",
 
-    # === ORAL ===
     "blowjob": """{skin_description}, {age}yo woman, {hair_description}, {eye_description}, {breast_description},
         blowjob, 1girl 1boy, kneeling, cock in mouth, looking up, eye contact,
         {setting_description}, soft lighting, glamour photography""",
@@ -157,7 +204,6 @@ PROMPTS = {
         69 position, 1girl 1boy, mutual oral, woman on top,
         {setting_description}, soft lighting, intimate""",
 
-    # === SOLO/MASTURBATION ===
     "fingering_solo": """{skin_description}, {age}yo woman, {hair_description}, {eye_description}, {breast_description},
         masturbation fingering, 1girl solo, fingers in pussy, legs spread, moaning,
         {setting_description}, soft lighting, glamour photography, bokeh""",
@@ -174,7 +220,6 @@ PROMPTS = {
         vibrator, 1girl solo, magic wand on pussy, trembling, moaning,
         {setting_description}, soft lighting, glamour photography""",
 
-    # === BODY FOCUS ===
     "boobs_close": """{skin_description}, {age}yo woman, {hair_description}, {breast_description},
         breast focus, 1girl solo, close up breasts, nipples, areolas detailed,
         studio lighting, glamour photography, shot on Canon EOS 5D, bokeh""",
@@ -199,7 +244,6 @@ PROMPTS = {
         spreading pussy, 1girl solo, fingers spreading labia, pink inside, wet,
         {setting_description}, soft lighting, glamour photography""",
 
-    # === AFTERMATH ===
     "creampie": """{skin_description}, {age}yo woman, {hair_description}, {eye_description}, {breast_description},
         creampie, 1girl, cum dripping from pussy, satisfied, post-sex,
         {setting_description}, soft lighting, intimate, bokeh""",
@@ -220,7 +264,6 @@ PROMPTS = {
         bukkake, 1girl multiple boys, covered in cum, multiple cumshots,
         {setting_description}, dramatic lighting""",
 
-    # === BDSM ===
     "handcuffs": """{skin_description}, {age}yo woman, {hair_description}, {eye_description}, {breast_description},
         handcuffs bondage, 1girl solo, hands bound, submissive, vulnerable,
         {setting_description}, dramatic lighting, cinematic""",
@@ -233,7 +276,6 @@ PROMPTS = {
         blindfolded, 1girl solo, sensory play, anticipation, vulnerable,
         {setting_description}, dramatic lighting, cinematic""",
 
-    # === GROUP ===
     "gangbang": """{skin_description}, {age}yo woman, {hair_description}, {breast_description},
         gangbang, 1girl multiple boys, group sex, overwhelmed,
         {setting_description}, dramatic lighting""",
@@ -250,7 +292,6 @@ PROMPTS = {
         lesbian sex, 2girls, kissing, tribbing, intimate, sensual,
         {setting_description}, soft lighting, glamour photography, bokeh""",
 
-    # === MISC ===
     "standing": """{skin_description}, {age}yo woman, {hair_description}, {eye_description}, {breast_description}, {butt_description},
         standing nude, 1girl solo, full body, confident pose,
         {setting_description}, glamour photography, soft lighting, shot on Canon EOS 5D""",
@@ -280,11 +321,7 @@ PROMPTS = {
         {setting_description}, dramatic lighting, shot on Canon EOS 5D""",
 }
 
-
-# ============================================
-# SFW PROMPTS - Lustify optimized
-# ============================================
-SFW_PROMPTS = {
+REALISTIC_SFW_PROMPTS = {
     "standing": """{skin_description}, {age}yo woman, {hair_description}, {eye_description}, {breast_description},
         standing pose, 1girl solo, casual clothes, confident, full body,
         {setting_description}, glamour photography, soft lighting, shot on Canon EOS 5D""",
@@ -300,19 +337,220 @@ SFW_PROMPTS = {
 
 
 # ============================================
+# ANIME PROMPTS (Danbooru tags)
+# ============================================
+ANIME_PROMPTS = {
+    "doggy_style": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        sex from behind, doggystyle, all fours, ass up, nude, vaginal, sweat, blush, open mouth,
+        {setting_description}""",
+    
+    "missionary": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        missionary, lying, on back, legs spread, nude, vaginal, sex, blush, sweat,
+        {setting_description}""",
+    
+    "cowgirl": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        cowgirl position, girl on top, straddling, bouncing breasts, nude, riding, blush, ahegao,
+        {setting_description}""",
+    
+    "reverse_cowgirl": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description}, {butt_description},
+        reverse cowgirl, ass, from behind, nude, riding, sweat,
+        {setting_description}""",
+    
+    "mating_press": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        mating press, legs up, spread legs, nude, deep penetration, ahegao, rolling eyes, tongue out,
+        {setting_description}""",
+    
+    "anal": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description}, {butt_description},
+        anal, from behind, nude, ass, blush, sweat,
+        {setting_description}""",
+    
+    "pronebone": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        prone bone, lying, on stomach, from behind, nude, sweat, blush,
+        {setting_description}""",
+    
+    "against_wall": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        against wall, standing sex, leg up, nude, sweat, blush,
+        {setting_description}""",
+
+    "blowjob": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        fellatio, oral, kneeling, looking up, nude, saliva, blush,
+        {setting_description}""",
+    
+    "deepthroat": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        deepthroat, irrumatio, tears, saliva, nude, blush,
+        {setting_description}""",
+    
+    "titfuck": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        paizuri, breast press, looking up, tongue out, nude, blush,
+        {setting_description}""",
+    
+    "cunnilingus": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        cunnilingus, oral, spread legs, pussy, nude, blush, moaning,
+        {setting_description}""",
+    
+    "face_sitting": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description}, {butt_description},
+        facesitting, sitting on face, ass, nude, blush,
+        {setting_description}""",
+    
+    "69_position": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        69, mutual oral, nude, blush,
+        {setting_description}""",
+
+    "fingering_solo": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, masturbation, fingering, spread legs, nude, pussy, blush, sweat,
+        {setting_description}""",
+    
+    "dildo_solo": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, dildo, sex toy, insertion, nude, blush,
+        {setting_description}""",
+    
+    "squirting": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        solo, squirting, female ejaculation, ahegao, nude, blush, sweat,
+        {setting_description}""",
+    
+    "vibrator": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, vibrator, sex toy, trembling, nude, blush, sweat,
+        {setting_description}""",
+
+    "boobs_close": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        solo, breast focus, nipples, areolae, nude, close-up,
+        {setting_description}""",
+    
+    "pussy_close": """masterpiece, best quality, {skin_description},
+        solo, pussy focus, spread pussy, nude, close-up,
+        {setting_description}""",
+    
+    "ass_close": """masterpiece, best quality, {skin_description}, {hair_description}, {butt_description},
+        solo, ass focus, from behind, anus, nude,
+        {setting_description}""",
+    
+    "all_fours_rear": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description}, {butt_description},
+        solo, all fours, ass up, from behind, looking back, nude,
+        {setting_description}""",
+    
+    "spread_ass": """masterpiece, best quality, {skin_description}, {hair_description}, {butt_description},
+        solo, spread ass, presenting, anus, nude,
+        {setting_description}""",
+    
+    "spread_pussy": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, spread pussy, spread legs, pussy, nude,
+        {setting_description}""",
+
+    "creampie": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        creampie, cum in pussy, cum drip, after sex, nude, blush,
+        {setting_description}""",
+    
+    "cumshot": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        facial, cum on face, tongue out, nude, blush, happy,
+        {setting_description}""",
+    
+    "cumshot_face": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        facial, cum on face, tongue out, nude, blush, happy,
+        {setting_description}""",
+    
+    "cum_on_body": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        cum on body, cum on breasts, cum on stomach, nude, blush,
+        {setting_description}""",
+    
+    "bukkake": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        bukkake, multiple boys, cum everywhere, nude, blush,
+        {setting_description}""",
+
+    "handcuffs": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, handcuffs, bound wrists, bondage, nude, blush,
+        {setting_description}""",
+    
+    "collar_leash": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        collar, leash, pet play, kneeling, nude, blush, submissive,
+        {setting_description}""",
+    
+    "blindfolded": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        solo, blindfold, nude, blush,
+        {setting_description}""",
+
+    "gangbang": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        gangbang, multiple boys, group sex, nude, blush, sweat,
+        {setting_description}""",
+    
+    "double_penetration": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        double penetration, 2boys, vaginal, anal, nude, blush, sweat, ahegao,
+        {setting_description}""",
+    
+    "threesome": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        threesome, 2boys, spitroast, nude, blush,
+        {setting_description}""",
+    
+    "lesbian": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        2girls, yuri, kiss, tribadism, nude, blush,
+        {setting_description}""",
+
+    "standing": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description}, {butt_description},
+        solo, standing, nude, full body,
+        {setting_description}""",
+    
+    "spread_legs_sitting": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, sitting, spread legs, pussy, nude,
+        {setting_description}""",
+    
+    "bent_over_solo": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description}, {butt_description},
+        solo, bent over, ass up, looking back, nude,
+        {setting_description}""",
+    
+    "showering": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, shower, wet, water, nude, steam,
+        {setting_description}""",
+    
+    "bath": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, bathing, onsen, water, wet, relaxed,
+        {setting_description}""",
+    
+    "yoga_pose": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description},
+        solo, yoga, flexible, nude, athletic,
+        {setting_description}""",
+    
+    "jack_o_pose": """masterpiece, best quality, {skin_description}, {hair_description}, {breast_description}, {butt_description},
+        solo, jack-o pose, ass up, face down, arched back, nude,
+        {setting_description}""",
+}
+
+ANIME_SFW_PROMPTS = {
+    "standing": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, standing, full body, casual clothes,
+        {setting_description}""",
+    
+    "sitting": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description}, {breast_description},
+        solo, sitting, relaxed, casual attire,
+        {setting_description}""",
+    
+    "portrait": """masterpiece, best quality, {skin_description}, {hair_description}, {eye_description},
+        solo, portrait, upper body, beautiful face, smile,
+        {setting_description}""",
+}
+
+
+# ============================================
 # MODEL LOADING
 # ============================================
-def load_models():
-    global pipe, pipe_img2img, compel, compel_img2img
-    if pipe is not None:
-        return pipe, pipe_img2img
+def load_model(style: str):
+    """Load model based on style"""
+    global models
     
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
+    style = style.lower()
+    if style not in ["realistic", "anime"]:
+        style = "realistic"
     
-    print(f"\n🎨 Loading model: {MODEL_PATH}")
+    # Check if already loaded
+    if models[style]["pipe"] is not None:
+        return models[style]
     
-    pipe = StableDiffusionXLPipeline.from_single_file(MODEL_PATH, torch_dtype=torch.float16, use_safetensors=True)
+    model_path = REALISTIC_MODEL if style == "realistic" else ANIME_MODEL
+    
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model not found: {model_path}")
+    
+    print(f"\n🎨 Loading {style.upper()} model: {model_path}")
+    
+    pipe = StableDiffusionXLPipeline.from_single_file(model_path, torch_dtype=torch.float16, use_safetensors=True)
     pipe_img2img = StableDiffusionXLImg2ImgPipeline(
         vae=pipe.vae, text_encoder=pipe.text_encoder, text_encoder_2=pipe.text_encoder_2,
         tokenizer=pipe.tokenizer, tokenizer_2=pipe.tokenizer_2, unet=pipe.unet, scheduler=pipe.scheduler
@@ -336,31 +574,38 @@ def load_models():
     except:
         pass
     
-    # Setup Compel for long prompt handling
+    # Compel
+    comp = None
+    comp_img2img = None
     if COMPEL_AVAILABLE:
-        compel = Compel(
+        comp = Compel(
             tokenizer=[pipe.tokenizer, pipe.tokenizer_2],
             text_encoder=[pipe.text_encoder, pipe.text_encoder_2],
             returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
             requires_pooled=[False, True]
         )
-        compel_img2img = Compel(
+        comp_img2img = Compel(
             tokenizer=[pipe_img2img.tokenizer, pipe_img2img.tokenizer_2],
             text_encoder=[pipe_img2img.text_encoder, pipe_img2img.text_encoder_2],
             returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
             requires_pooled=[False, True]
         )
-        print("✅ Compel configured for long prompts")
     
-    print("✅ Model loaded!")
-    return pipe, pipe_img2img
+    models[style] = {
+        "pipe": pipe,
+        "pipe_img2img": pipe_img2img,
+        "compel": comp,
+        "compel_img2img": comp_img2img
+    }
+    
+    print(f"✅ {style.upper()} model loaded!")
+    return models[style]
 
 
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
 def safe_format(template: str, **kwargs) -> str:
-    """Format string with fallback for missing keys"""
     placeholders = re.findall(r'\{(\w+)\}', template)
     for key in placeholders:
         if key not in kwargs:
@@ -375,19 +620,47 @@ def enhance_image(image: Image.Image) -> Image.Image:
     return image
 
 
-def upload_to_cloudinary(image: Image.Image, character_name: str, pose: str, seed: int) -> dict:
-    if not CLOUDINARY_AVAILABLE:
+def upload_to_supabase(image: Image.Image, character_name: str, pose: str, seed: int, style: str) -> dict:
+    """Upload image to Supabase Storage and return public URL"""
+    if not SUPABASE_AVAILABLE or not supabase_client:
         return None
-    buffer = BytesIO()
-    image.save(buffer, format="WEBP", quality=85)
-    buffer.seek(0)
-    folder = f"nsfw_generations/{character_name.lower().replace(' ', '_')}"
-    result = cloudinary.uploader.upload(buffer, public_id=f"{pose}_{seed}", folder=folder, format="webp", overwrite=True)
-    return {"url": result['secure_url'], "public_id": result['public_id']}
+    
+    try:
+        # Convert image to bytes
+        buffer = BytesIO()
+        image.save(buffer, format="WEBP", quality=85)
+        image_bytes = buffer.getvalue()
+        
+        # Create file path: style/character_name/pose_seed_timestamp.webp
+        timestamp = int(time.time())
+        safe_name = character_name.lower().replace(' ', '_').replace('-', '_')
+        file_path = f"{style}/{safe_name}/{pose}_{seed}_{timestamp}.webp"
+        
+        # Upload to Supabase Storage
+        result = supabase_client.storage.from_(SUPABASE_BUCKET).upload(
+            path=file_path,
+            file=image_bytes,
+            file_options={"content-type": "image/webp", "upsert": "true"}
+        )
+        
+        # Get public URL
+        public_url = supabase_client.storage.from_(SUPABASE_BUCKET).get_public_url(file_path)
+        
+        print(f"✅ Uploaded to Supabase: {file_path}")
+        
+        return {
+            "url": public_url,
+            "path": file_path,
+            "bucket": SUPABASE_BUCKET
+        }
+        
+    except Exception as e:
+        print(f"❌ Supabase upload error: {e}")
+        return None
 
 
-def parse_character(character: dict) -> dict:
-    """Parse character data from frontend payload"""
+def parse_character(character: dict, style: str) -> dict:
+    """Parse character - different for each style"""
     
     # Hair
     hair_style = character.get("hairStyle", "long").lower()
@@ -398,54 +671,54 @@ def parse_character(character: dict) -> dict:
         if color in description:
             hair_color = color
             break
-    hair_description = f"{hair_color} {hair_style} hair".strip()
+    hair_description = f"{hair_color} {hair_style} hair".strip() if style == "realistic" else f"{hair_color} hair, {hair_style} hair"
     
     # Eyes
     eye_color = character.get("eyeColor", "blue").lower()
     eye_description = f"{eye_color} eyes"
     
-    # Breast
+    # Breast - different tags for anime
     breast_size = character.get("breastSize", "Large").lower()
-    breast_map = {
-        "small": "small breasts",
-        "medium": "medium breasts", 
-        "large": "large breasts",
-        "extra-large": "huge breasts"
-    }
+    if style == "anime":
+        breast_map = {
+            "small": "small breasts, flat chest",
+            "medium": "medium breasts",
+            "large": "large breasts",
+            "extra-large": "huge breasts, gigantic breasts"
+        }
+    else:
+        breast_map = {
+            "small": "small breasts",
+            "medium": "medium breasts",
+            "large": "large breasts",
+            "extra-large": "huge breasts"
+        }
     breast_description = breast_map.get(breast_size, "large breasts")
     
     # Butt
     butt_size = character.get("buttSize", "Medium").lower()
-    butt_map = {
-        "small": "small butt",
-        "medium": "round butt",
-        "large": "big butt bubble butt",
-        "extra-large": "huge butt thicc"
-    }
+    if style == "anime":
+        butt_map = {
+            "small": "small ass",
+            "medium": "ass",
+            "large": "big ass, huge ass",
+            "extra-large": "huge ass"
+        }
+    else:
+        butt_map = {
+            "small": "small butt",
+            "medium": "round butt",
+            "large": "big butt bubble butt",
+            "extra-large": "huge butt thicc"
+        }
     butt_description = butt_map.get(butt_size, "round butt")
     
-    # === ETHNICITY - CRITICAL FOR CLIP FIRST 77 TOKENS ===
+    # Ethnicity
     ethnicity = character.get("ethnicity", "white").lower()
+    ethnicity_map = ANIME_ETHNICITY if style == "anime" else REALISTIC_ETHNICITY
+    skin_description = ethnicity_map.get(ethnicity, ethnicity_map.get("white", ""))
     
-    # Short but effective ethnicity descriptions
-    ethnicity_map = {
-        # Real ethnicities
-        "asian": "asian woman, east asian, porcelain skin, asian face, monolid",
-        "black": "black woman, ebony skin, african features, dark skin beauty",
-        "white": "caucasian woman, fair skin, european features",
-        "latina": "latina woman, tan skin, hispanic features, curvy",
-        "arab": "arab woman, middle eastern, olive skin, exotic beauty",
-        "indian": "indian woman, south asian, brown skin, desi beauty",
-        
-        # Fantasy ethnicities
-        "elf": "elf woman, pointed elf ears, ethereal beauty, elven features, fantasy elf",
-        "alien": "alien woman, otherworldly, pointed ears, exotic alien, sci-fi",
-        "demon": "demon woman, succubus, small horns, demonic beauty, supernatural",
-    }
-    
-    skin_description = ethnicity_map.get(ethnicity, ethnicity_map["white"])
-    
-    # Occupation/setting
+    # Setting
     personality = character.get("personalityId", {}) or {}
     occupation = personality.get("occupationId", "None")
     occ_setting = OCCUPATION_SETTINGS.get(occupation, OCCUPATION_SETTINGS["None"])
@@ -469,24 +742,28 @@ def parse_character(character: dict) -> dict:
 # MAIN HANDLER
 # ============================================
 def handler(event):
-    """Handle image generation - accepts frontend payload format"""
+    """Handle image generation - Realistic or Anime"""
     try:
         input_data = event.get("input", {})
         
-        # Parse character
+        # Get style
         character = input_data.get("character", {})
+        style = character.get("style", input_data.get("style", "Realistic")).lower()
+        if style not in ["realistic", "anime"]:
+            style = "realistic"
+        
+        # Parse character
         if character:
-            features = parse_character(character)
+            features = parse_character(character, style)
         else:
             features = {
                 "age": input_data.get("age", 25),
                 "name": input_data.get("character_name", "unknown"),
-                "ethnicity": input_data.get("ethnicity", "white"),
                 "hair_description": input_data.get("hair_description", "long hair"),
                 "eye_description": input_data.get("eye_description", "blue eyes"),
                 "breast_description": input_data.get("breast_description", "large breasts"),
                 "butt_description": input_data.get("butt_description", "round butt"),
-                "skin_description": input_data.get("skin_description", "caucasian woman, fair skin"),
+                "skin_description": input_data.get("skin_description", ""),
                 "setting_description": input_data.get("setting_description", "bedroom, soft lighting"),
             }
         
@@ -497,10 +774,9 @@ def handler(event):
             pose_name = personality.get("poseId", "standing")
         if not pose_name:
             pose_name = "standing"
-        
         pose_name = pose_name.lower().replace(' ', '_').replace('-', '_')
         
-        # Other params
+        # Params
         quality = input_data.get("quality", "hd")
         seed = input_data.get("seed") or -1
         use_highres = input_data.get("use_highres", True)
@@ -508,27 +784,25 @@ def handler(event):
         nsfw = input_data.get("nsfw", True)
         upload_cloud = input_data.get("upload_cloudinary", True)
         
-        # Select prompts
-        if nsfw:
-            prompts_dict = PROMPTS
-            negative_prompt = NEGATIVE_PROMPT
+        # Select prompts/presets based on style
+        if style == "anime":
+            prompts_dict = ANIME_PROMPTS if nsfw else ANIME_SFW_PROMPTS
+            negative_prompt = ANIME_NEGATIVE if nsfw else ANIME_SFW_NEGATIVE
+            presets = ANIME_PRESETS
         else:
-            prompts_dict = SFW_PROMPTS
-            negative_prompt = SFW_NEGATIVE_PROMPT
-            if pose_name not in prompts_dict:
-                pose_name = "standing"
+            prompts_dict = REALISTIC_PROMPTS if nsfw else REALISTIC_SFW_PROMPTS
+            negative_prompt = REALISTIC_NEGATIVE if nsfw else REALISTIC_SFW_NEGATIVE
+            presets = REALISTIC_PRESETS
         
-        # Build prompt
-        if pose_name in prompts_dict:
-            prompt = safe_format(prompts_dict[pose_name], **features)
-        else:
-            prompt = safe_format(prompts_dict.get("standing", PROMPTS["standing"]), **features)
+        # Fallback pose
+        if pose_name not in prompts_dict:
             pose_name = "standing"
         
-        # Clean prompt - remove extra whitespace
+        # Build prompt
+        prompt = safe_format(prompts_dict[pose_name], **features)
         prompt = ' '.join(prompt.split())
         
-        preset = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["hd"])
+        preset = presets.get(quality, presets["hd"])
         
         if seed == -1 or seed is None:
             seed = torch.randint(0, 2**32, (1,)).item()
@@ -536,24 +810,27 @@ def handler(event):
         generator = torch.Generator(device="cuda").manual_seed(seed)
         
         print(f"\n{'='*60}")
-        print(f"🎨 Generating: {features['name']}")
-        print(f"   Ethnicity: {features['ethnicity']}")
+        print(f"🎨 Generating [{style.upper()}]: {features['name']}")
+        print(f"   Ethnicity: {features.get('ethnicity', 'N/A')}")
         print(f"   Pose: {pose_name} | Quality: {quality}")
-        print(f"   Prompt (first 200 chars): {prompt[:200]}...")
+        print(f"   Prompt: {prompt[:150]}...")
         print(f"{'='*60}")
         
         start_time = time.time()
         
         # Load model
-        model, model_img2img = load_models()
+        model_data = load_model(style)
+        pipe = model_data["pipe"]
+        pipe_img2img = model_data["pipe_img2img"]
+        comp = model_data["compel"]
+        comp_img2img = model_data["compel_img2img"]
         
-        # Generate with Compel if available (handles long prompts better)
-        if COMPEL_AVAILABLE and compel:
-            print("📝 Using Compel for prompt encoding")
-            conditioning, pooled = compel(prompt)
-            neg_conditioning, neg_pooled = compel(negative_prompt)
+        # Generate
+        if COMPEL_AVAILABLE and comp:
+            conditioning, pooled = comp(prompt)
+            neg_conditioning, neg_pooled = comp(negative_prompt)
             
-            image = model(
+            image = pipe(
                 prompt_embeds=conditioning,
                 pooled_prompt_embeds=pooled,
                 negative_prompt_embeds=neg_conditioning,
@@ -566,8 +843,7 @@ def handler(event):
                 clip_skip=2
             ).images[0]
         else:
-            print("📝 Using standard prompt encoding")
-            image = model(
+            image = pipe(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
                 width=preset['base_width'],
@@ -585,11 +861,11 @@ def handler(event):
             upscaled = image.resize((final_w, final_h), Image.LANCZOS)
             generator = torch.Generator(device="cuda").manual_seed(seed + 1)
             
-            if COMPEL_AVAILABLE and compel_img2img:
-                conditioning, pooled = compel_img2img(prompt)
-                neg_conditioning, neg_pooled = compel_img2img(negative_prompt)
+            if COMPEL_AVAILABLE and comp_img2img:
+                conditioning, pooled = comp_img2img(prompt)
+                neg_conditioning, neg_pooled = comp_img2img(negative_prompt)
                 
-                image = model_img2img(
+                image = pipe_img2img(
                     prompt_embeds=conditioning,
                     pooled_prompt_embeds=pooled,
                     negative_prompt_embeds=neg_conditioning,
@@ -601,7 +877,7 @@ def handler(event):
                     generator=generator
                 ).images[0]
             else:
-                image = model_img2img(
+                image = pipe_img2img(
                     prompt=prompt,
                     negative_prompt=negative_prompt,
                     image=upscaled,
@@ -628,22 +904,22 @@ def handler(event):
             "success": True,
             "image": img_base64,
             "seed": seed,
+            "style": style,
             "character_name": features["name"],
-            "ethnicity": features["ethnicity"],
+            "ethnicity": features.get("ethnicity", "N/A"),
             "pose": pose_name,
-            "occupation": features.get("occupation", "None"),
             "quality": quality,
             "resolution": f"{final_w}x{final_h}",
             "generation_time": f"{gen_time:.2f}s"
         }
         
-        # Cloudinary
-        if upload_cloud and CLOUDINARY_AVAILABLE:
-            cloud_result = upload_to_cloudinary(image, features["name"], pose_name, seed)
-            if cloud_result:
-                result["image_url"] = cloud_result["url"]
-                result["cloudinary_url"] = cloud_result["url"]
-                result["cloudinary_public_id"] = cloud_result["public_id"]
+        # Supabase Storage
+        if upload_cloud and SUPABASE_AVAILABLE:
+            supabase_result = upload_to_supabase(image, features["name"], pose_name, seed, style)
+            if supabase_result:
+                result["image_url"] = supabase_result["url"]
+                result["supabase_url"] = supabase_result["url"]
+                result["supabase_path"] = supabase_result["path"]
         
         return result
         
